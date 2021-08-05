@@ -3,5 +3,5 @@ A terminal program to communicate with a serial console written in [Rust](https:
 
 # Usage
 ```bash
-sc help
+sc -h
 ```
