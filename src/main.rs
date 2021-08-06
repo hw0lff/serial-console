@@ -10,7 +10,15 @@ use termion::raw::IntoRawMode;
 use termion::screen::*;
 
 #[derive(Debug, StructOpt)]
-#[structopt(author, global_setting(structopt::clap::AppSettings::ColoredHelp))]
+#[structopt(
+    author,
+    global_setting(structopt::clap::AppSettings::ColoredHelp),
+    after_help = "\
+Escape commands consist of a carriage return and one of the following sequences:
+    ~~ - sends the '~' character
+    ~. - terminates the connection
+"
+)]
 struct SC {
     /// Sets the device path to a serial port
     #[structopt(parse(from_str))]
@@ -278,13 +286,11 @@ fn parse_arguments_into_serialport(sc_args: &SC) -> SerialPortBuilder {
         .timeout(timeout)
 }
 
-// fn print_command
-
 fn write_start_screen_msg<W: Write>(screen: &mut Arc<Mutex<W>>) {
     let screen = screen.clone();
     write!(
         screen.lock().unwrap(),
-        "{}{}Welcome to serial console.{}To exit unplug the serial port.{}",
+        "{}{}Welcome to serial console.{}To exit type CR + ~ + .\r\nor unplug the serial port.{}",
         termion::clear::All,
         termion::cursor::Goto(1, 1),
         termion::cursor::Goto(1, 2),
