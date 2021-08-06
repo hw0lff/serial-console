@@ -35,6 +35,19 @@ Common values: 300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400,
     )]
     baud_rate: u32,
 
+    /// Shorter settings in this format: <data bits><parity><stop bits>
+    #[structopt(
+        name = "short settings",
+        conflicts_with_all(&["data_bits", "parity", "stop_bits"]),
+        default_value = "8N1",
+        case_insensitive = true,
+        long_help = r"Shorter settings in this format: <data bits><parity><stop bits>
+
+Examples: 8N1, 7E1
+"
+    )]
+    short_settings: String,
+
     /// Sets the number of bits used per character
     #[structopt(
         name = "data bits",
@@ -244,6 +257,13 @@ fn parse_arguments_into_serialport(sc_args: &SC) -> SerialPortBuilder {
     }
     let path: String = sc_args.device.clone();
     let baud_rate: u32 = sc_args.baud_rate;
+    if sc_args.short_settings.as_str() != "8N1" {
+        if sc_args.short_settings.len() != 3 {
+            eprintln!("error: Invalid value for '<short settings>': {}", sc_args.short_settings);
+            std::process::exit(1);
+        }
+
+    }
     let data_bits: DataBits = match_data_bits(sc_args.data_bits);
     let parity: Parity = match_parity(sc_args.parity.as_str());
     let stop_bits: StopBits = match_stop_bits(sc_args.stop_bits);
