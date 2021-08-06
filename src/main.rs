@@ -1,10 +1,9 @@
 use log::trace;
-use serialport::SerialPortBuilder;
-use serialport::{DataBits, FlowControl, Parity, StopBits};
+use serialport::{DataBits, FlowControl, Parity, SerialPortBuilder, StopBits};
 use std::io::{stdin, stdout, Read, Write};
+use std::sync::mpsc::{self, TryRecvError};
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::thread::JoinHandle;
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 use structopt::StructOpt;
 use termion::raw::IntoRawMode;
@@ -81,6 +80,23 @@ Possible values:
     flow_control: String,
 }
 
+enum EscapeState {
+    // Wait for carriage return
+    WaitForCR,
+    // Wait for escape character
+    WaitForEC,
+    // Ready to process command
+    ProcessCMD,
+}
+
+enum ThreadReport {
+    Error(std::io::Error),
+}
+
+enum ThreadAction {
+    Stop,
+}
+
 fn main() {
     let sc_args: SC = SC::from_args();
 
@@ -105,6 +121,10 @@ fn main() {
 
     write_start_screen_msg(&mut screen.clone());
 
+    let (kill_from_serial_thread_tx, kill_from_serial_thread_rx) = mpsc::channel::<ThreadAction>();
+    let (report_to_to_serial_thread_tx, report_to_to_serial_thread_rx) =
+        mpsc::channel::<ThreadReport>();
+
     let screen_from = screen.clone();
     let _from_serial_handle = thread::spawn(move || loop {
         let mut serial_bytes = [0; 512];
@@ -119,34 +139,106 @@ fn main() {
                     screen_from.lock().unwrap().flush().unwrap();
                 }
             }
-            Err(ref err) if err.kind() == std::io::ErrorKind::TimedOut => {}
-            // todo: catch broken pipe error
+            Err(err) if err.kind() == std::io::ErrorKind::TimedOut => {}
+            // todo: Handle broken pipe error better and try to reconnect
             Err(err) => {
-                eprint!("{}{}\n\r", ToMainScreen, err);
+                report_to_to_serial_thread_tx
+                    .send(ThreadReport::Error(err))
+                    .unwrap();
                 break;
             }
         }
+
+        // it ends the infinite loop if it recieves ThreadAction or gets disconnected
+        match kill_from_serial_thread_rx.try_recv() {
+            Ok(ThreadAction::Stop) | Err(TryRecvError::Disconnected) => {
+                break;
+            }
+            Err(TryRecvError::Empty) => {}
+        }
     });
 
-    let _to_serial_handle: JoinHandle<_> = thread::spawn(move || loop {
-        let mut data = [0; 512];
-        let n = stdin.read(&mut data).unwrap();
+    // let screen_to = screen.clone();
+    let _to_serial_handle: JoinHandle<_> = thread::spawn(move || {
+        let mut escape_state: EscapeState = EscapeState::WaitForCR;
+        loop {
+            let mut data = [0; 512];
+            let n = stdin.read(&mut data).unwrap();
 
-        match serial_port_in.write(&data[..n]) {
-            Ok(n) => {
-                trace!("wrote {} bytes", n);
+            if n == 1 {
+                match escape_state {
+                    EscapeState::WaitForCR => {
+                        if data[0] == b'\r' {
+                            escape_state = EscapeState::WaitForEC;
+                        }
+                    }
+                    EscapeState::WaitForEC => match data[0] {
+                        b'~' => {
+                            escape_state = EscapeState::ProcessCMD;
+                            continue;
+                        }
+                        b'\r' => {
+                            escape_state = EscapeState::WaitForEC;
+                        }
+                        _ => {
+                            escape_state = EscapeState::WaitForCR;
+                        }
+                    },
+                    EscapeState::ProcessCMD => match data[0] {
+                        b'.' => {
+                            // stop the other thread
+                            let _ = kill_from_serial_thread_tx.send(ThreadAction::Stop);
+                            break;
+                        }
+                        b'\r' => {
+                            escape_state = EscapeState::WaitForEC;
+                        }
+                        _ => {
+                            escape_state = EscapeState::WaitForCR;
+                        }
+                    },
+                }
             }
-            Err(ref err) if err.kind() == std::io::ErrorKind::TimedOut => {}
-            Err(err) => {
-                eprint!("{}{}\n\r", ToMainScreen, err);
-                break;
+
+            // Get reports from the other thread
+            match report_to_to_serial_thread_rx.try_recv() {
+                Ok(thread_report) => match thread_report {
+                    ThreadReport::Error(ref err)
+                    // todo handle broken pipe error from other thread better and try to reconnect
+                        if err.kind() == std::io::ErrorKind::BrokenPipe =>
+                    {
+                        eprint!("{}Device disconnected\n\r", ToMainScreen);
+                        break;
+                    }
+                    ThreadReport::Error(err) => {
+                        eprint!("{}{}\n\r", ToMainScreen, err);
+                        break;
+                    }
+                },
+                Err(TryRecvError::Disconnected) => {
+                    let _ = kill_from_serial_thread_tx.send(ThreadAction::Stop);
+                    break;
+                }
+                Err(TryRecvError::Empty) => {}
+            }
+
+            // try to write terminal input to serial port
+            match serial_port_in.write(&data[..n]) {
+                Ok(i) => {
+                    trace!("wrote {} bytes", i);
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::TimedOut => {}
+                Err(err) => {
+                    eprint!("{}{}\n\r", ToMainScreen, err);
+                    let _ = kill_from_serial_thread_tx.send(ThreadAction::Stop);
+                    break;
+                }
             }
         }
     });
 
     _from_serial_handle.join().unwrap();
-    // _to_serial_handle.join();
-    screen.lock().unwrap().flush().unwrap();
+    _to_serial_handle.join().unwrap();
 }
 
 fn parse_arguments_into_serialport(sc_args: &SC) -> SerialPortBuilder {
@@ -186,6 +278,8 @@ fn parse_arguments_into_serialport(sc_args: &SC) -> SerialPortBuilder {
         .timeout(timeout)
 }
 
+// fn print_command
+
 fn write_start_screen_msg<W: Write>(screen: &mut Arc<Mutex<W>>) {
     let screen = screen.clone();
     write!(
@@ -196,6 +290,6 @@ fn write_start_screen_msg<W: Write>(screen: &mut Arc<Mutex<W>>) {
         termion::cursor::Goto(1, 2),
         termion::cursor::Goto(1, 4)
     )
-        .unwrap();
+    .unwrap();
     screen.lock().unwrap().flush().unwrap();
 }
