@@ -39,25 +39,20 @@ Common values: 300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400,
     #[structopt(
         name = "data bits",
         default_value = "8",
-        long_help = r"Sets the number of bits per character
-
-Possible values:
-    - 5
-    - 6
-    - 7
-    - 8
-"
+        possible_values = &["5", "6", "7", "8"],
     )]
     data_bits: u8,
     /// Sets the parity checking mode
     #[structopt(
-        default_value = "None",
+        default_value = "N",
+        case_insensitive = true,
+        possible_values = &["N","O","E"],
         long_help = r"Sets the parity checking mode
 
 Possible values:
-    - None, N, n => None
-    - Odd,  O, o => Odd
-    - Even, E, e => Even
+    - N, n => None
+    - O, o => Odd
+    - E, e => Even
 "
     )]
     parity: String,
@@ -65,24 +60,21 @@ Possible values:
     #[structopt(
         name = "stop bits",
         default_value = "1",
-        long_help = r"Sets the number of stop bits transmitted after every character
-
-Possible values:
-    - 1
-    - 2
-"
+        possible_values = &["1", "2"],
     )]
     stop_bits: u8,
     /// Sets the flow control mode
     #[structopt(
         name = "flow control",
-        default_value = "None",
+        default_value = "N",
+        case_insensitive = true,
+        possible_values = &["N","H","S"],
         long_help = r"Sets the flow control mode
 
 Possible values:
-    - None, N, n => None
-    - Hardware, Hard, H, h => Hardware    # uses XON/XOFF bytes
-    - Software, Soft, S, s => Software    # uses RTS/CTS signals
+    - N, n => None
+    - H, h => Hardware    # uses XON/XOFF bytes
+    - S, s => Software    # uses RTS/CTS signals
 "
     )]
     flow_control: String,
@@ -218,32 +210,44 @@ fn main() {
 }
 
 fn parse_arguments_into_serialport(sc_args: &SC) -> SerialPortBuilder {
+    fn match_data_bits(data_bits: u8) -> DataBits {
+        match data_bits {
+            8 => DataBits::Eight,
+            7 => DataBits::Seven,
+            6 => DataBits::Six,
+            5 => DataBits::Five,
+            _ => DataBits::Eight,
+        }
+    }
+    fn match_parity(parity: &str) -> Parity {
+        match parity {
+            "N" | "n" => Parity::None,
+            "O" | "o" => Parity::Odd,
+            "E" | "e" => Parity::None,
+            _ => Parity::None,
+        }
+    }
+    fn match_stop_bits(stop_bits: u8) -> StopBits {
+        match stop_bits {
+            1 => StopBits::One,
+            2 => StopBits::Two,
+            _ => StopBits::One,
+        }
+    }
+    fn match_flow_control(flow_control: &str) -> FlowControl {
+        match flow_control {
+            "N" | "n" => FlowControl::None,
+            "H" | "h" => FlowControl::Hardware,
+            "S" | "s" => FlowControl::Software,
+            _ => FlowControl::None,
+        }
+    }
     let path: String = sc_args.device.clone();
     let baud_rate: u32 = sc_args.baud_rate;
-    let data_bits: DataBits = match sc_args.data_bits {
-        8 => DataBits::Eight,
-        7 => DataBits::Seven,
-        6 => DataBits::Six,
-        5 => DataBits::Five,
-        _ => DataBits::Eight,
-    };
-    let parity: Parity = match sc_args.parity.as_str() {
-        "None" | "N" | "n" => Parity::None,
-        "Odd" | "O" | "o" => Parity::Odd,
-        "Even" | "E" | "e" => Parity::None,
-        _ => Parity::None,
-    };
-    let stop_bits: StopBits = match sc_args.stop_bits {
-        1 => StopBits::One,
-        2 => StopBits::Two,
-        _ => StopBits::One,
-    };
-    let flow_control: FlowControl = match sc_args.flow_control.as_str() {
-        "None" | "N" | "n" => FlowControl::None,
-        "Hardware" | "Hard" | "H" | "h" => FlowControl::Hardware,
-        "Software" | "Soft" | "S" | "s" => FlowControl::Software,
-        _ => FlowControl::None,
-    };
+    let data_bits: DataBits = match_data_bits(sc_args.data_bits);
+    let parity: Parity = match_parity(sc_args.parity.as_str());
+    let stop_bits: StopBits = match_stop_bits(sc_args.stop_bits);
+    let flow_control: FlowControl = match_flow_control(sc_args.flow_control.as_str());
     let timeout: Duration = Duration::from_millis(10);
 
     serialport::new(path, baud_rate)
