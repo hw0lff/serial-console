@@ -81,20 +81,6 @@ Possible values:
     flow_control: String,
 }
 
-fn write_start_screen_msg<W: Write>(screen: &mut Arc<Mutex<W>>) {
-    let screen = screen.clone();
-    write!(
-        screen.lock().unwrap(),
-        "{}{}Welcome to serial console.{}To exit unplug the serial port.{}",
-        termion::clear::All,
-        termion::cursor::Goto(1, 1),
-        termion::cursor::Goto(1, 2),
-        termion::cursor::Goto(1, 4)
-    )
-    .unwrap();
-    screen.lock().unwrap().flush().unwrap();
-}
-
 fn main() {
     let sc_args: SC = SC::from_args();
 
@@ -198,4 +184,18 @@ fn parse_arguments_into_serialport(sc_args: &SC) -> SerialPortBuilder {
         .stop_bits(stop_bits)
         .flow_control(flow_control)
         .timeout(timeout)
+}
+
+fn write_start_screen_msg<W: Write>(screen: &mut Arc<Mutex<W>>) {
+    let screen = screen.clone();
+    write!(
+        screen.lock().unwrap(),
+        "{}{}Welcome to serial console.{}To exit unplug the serial port.{}",
+        termion::clear::All,
+        termion::cursor::Goto(1, 1),
+        termion::cursor::Goto(1, 2),
+        termion::cursor::Goto(1, 4)
+    )
+        .unwrap();
+    screen.lock().unwrap().flush().unwrap();
 }
