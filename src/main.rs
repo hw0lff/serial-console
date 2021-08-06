@@ -3,7 +3,7 @@ use serialport::{DataBits, FlowControl, Parity, SerialPortBuilder, StopBits};
 use std::io::{stdin, stdout, Read, Write};
 use std::sync::mpsc::{self, TryRecvError};
 use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
+use std::thread;
 use std::time::Duration;
 use structopt::StructOpt;
 use termion::raw::IntoRawMode;
@@ -97,14 +97,6 @@ enum EscapeState {
     ProcessCMD,
 }
 
-enum ThreadReport {
-    Error(std::io::Error),
-}
-
-enum ThreadAction {
-    Stop,
-}
-
 fn main() {
     let sc_args: SC = SC::from_args();
 
@@ -129,124 +121,100 @@ fn main() {
 
     write_start_screen_msg(&mut screen.clone());
 
-    let (kill_from_serial_thread_tx, kill_from_serial_thread_rx) = mpsc::channel::<ThreadAction>();
-    let (report_to_to_serial_thread_tx, report_to_to_serial_thread_rx) =
-        mpsc::channel::<ThreadReport>();
+    let (tx, rx) = mpsc::channel::<([u8; 512], usize)>();
 
-    let screen_from = screen.clone();
-    let _from_serial_handle = thread::spawn(move || loop {
+    let _terminal_stdin = thread::spawn(move || loop {
+        let mut data = [0; 512];
+        let n = stdin.read(&mut data[..]).unwrap();
+        tx.send((data, n)).unwrap();
+    });
+
+    let mut escape_state: EscapeState = EscapeState::WaitForCR;
+    loop {
         let mut serial_bytes = [0; 512];
         match serial_port_out.read(&mut serial_bytes[..]) {
             Ok(n) => {
                 if n > 0 {
-                    screen_from
+                    screen
                         .lock()
                         .unwrap()
                         .write_all(&serial_bytes[..n])
                         .unwrap();
-                    screen_from.lock().unwrap().flush().unwrap();
+                    screen.lock().unwrap().flush().unwrap();
                 }
             }
             Err(err) if err.kind() == std::io::ErrorKind::TimedOut => {}
-            // todo: Handle broken pipe error better and try to reconnect
+            Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => {
+                eprint!("{}Device disconnected\n\r", ToMainScreen);
+                break;
+            }
             Err(err) => {
-                report_to_to_serial_thread_tx
-                    .send(ThreadReport::Error(err))
-                    .unwrap();
+                eprint!("{}{}\n\r", ToMainScreen, err);
                 break;
             }
         }
 
-        // it ends the infinite loop if it recieves ThreadAction or gets disconnected
-        match kill_from_serial_thread_rx.try_recv() {
-            Ok(ThreadAction::Stop) | Err(TryRecvError::Disconnected) => {
+        let data: [u8; 512];
+        let n: usize;
+        match rx.try_recv() {
+            Ok((rx_data, rx_n)) => {
+                data = rx_data;
+                n = rx_n;
+            }
+            Err(TryRecvError::Disconnected) => {
+                eprint!("{}Error: Stdin reading thread stopped.\n\r", ToMainScreen,);
                 break;
             }
-            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Empty) => {
+                continue;
+            }
         }
-    });
 
-    // let screen_to = screen.clone();
-    let _to_serial_handle: JoinHandle<_> = thread::spawn(move || {
-        let mut escape_state: EscapeState = EscapeState::WaitForCR;
-        loop {
-            let mut data = [0; 512];
-            let n = stdin.read(&mut data).unwrap();
-
-            if n == 1 {
-                match escape_state {
-                    EscapeState::WaitForCR => {
-                        if data[0] == b'\r' {
-                            escape_state = EscapeState::WaitForEC;
-                        }
+        if n == 1 {
+            match escape_state {
+                EscapeState::WaitForCR => {
+                    if data[0] == b'\r' {
+                        escape_state = EscapeState::WaitForEC;
                     }
-                    EscapeState::WaitForEC => match data[0] {
-                        b'~' => {
-                            escape_state = EscapeState::ProcessCMD;
-                            continue;
-                        }
-                        b'\r' => {
-                            escape_state = EscapeState::WaitForEC;
-                        }
-                        _ => {
-                            escape_state = EscapeState::WaitForCR;
-                        }
-                    },
-                    EscapeState::ProcessCMD => match data[0] {
-                        b'.' => {
-                            // stop the other thread
-                            let _ = kill_from_serial_thread_tx.send(ThreadAction::Stop);
-                            break;
-                        }
-                        b'\r' => {
-                            escape_state = EscapeState::WaitForEC;
-                        }
-                        _ => {
-                            escape_state = EscapeState::WaitForCR;
-                        }
-                    },
                 }
-            }
-
-            // Get reports from the other thread
-            match report_to_to_serial_thread_rx.try_recv() {
-                Ok(thread_report) => match thread_report {
-                    ThreadReport::Error(ref err)
-                    // todo handle broken pipe error from other thread better and try to reconnect
-                        if err.kind() == std::io::ErrorKind::BrokenPipe =>
-                    {
-                        eprint!("{}Device disconnected\n\r", ToMainScreen);
-                        break;
+                EscapeState::WaitForEC => match data[0] {
+                    b'~' => {
+                        escape_state = EscapeState::ProcessCMD;
+                        continue;
                     }
-                    ThreadReport::Error(err) => {
-                        eprint!("{}{}\n\r", ToMainScreen, err);
-                        break;
+                    b'\r' => {
+                        escape_state = EscapeState::WaitForEC;
+                    }
+                    _ => {
+                        escape_state = EscapeState::WaitForCR;
                     }
                 },
-                Err(TryRecvError::Disconnected) => {
-                    let _ = kill_from_serial_thread_tx.send(ThreadAction::Stop);
-                    break;
-                }
-                Err(TryRecvError::Empty) => {}
-            }
-
-            // try to write terminal input to serial port
-            match serial_port_in.write(&data[..n]) {
-                Ok(i) => {
-                    trace!("wrote {} bytes", i);
-                }
-                Err(err) if err.kind() == std::io::ErrorKind::TimedOut => {}
-                Err(err) => {
-                    eprint!("{}{}\n\r", ToMainScreen, err);
-                    let _ = kill_from_serial_thread_tx.send(ThreadAction::Stop);
-                    break;
-                }
+                EscapeState::ProcessCMD => match data[0] {
+                    b'.' => {
+                        break;
+                    }
+                    b'\r' => {
+                        escape_state = EscapeState::WaitForEC;
+                    }
+                    _ => {
+                        escape_state = EscapeState::WaitForCR;
+                    }
+                },
             }
         }
-    });
 
-    _from_serial_handle.join().unwrap();
-    _to_serial_handle.join().unwrap();
+        // try to write terminal input to serial port
+        match serial_port_in.write(&data[..n]) {
+            Ok(i) => {
+                trace!("wrote {} bytes", i);
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::TimedOut => {}
+            Err(err) => {
+                eprint!("{}{}\n\r", ToMainScreen, err);
+                break;
+            }
+        }
+    }
 }
 
 fn parse_arguments_into_serialport(sc_args: &SC) -> SerialPortBuilder {
