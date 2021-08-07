@@ -5,6 +5,8 @@ authors = ["Hendrik Wolff <hendrik.wolff@agdsn.me>"]
 license = "MIT"
 repository = "https://gitlab.com/w0lff/serial-console"
 description = "A terminal program to communicate with a serial console"
+categories = ["command-line-utilities"]
+keywords = ["cli", "serial", "console", "rs232"]
 edition = "2018"
 
 [dependencies]
