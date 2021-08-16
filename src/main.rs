@@ -14,7 +14,7 @@ use termion::screen::*;
     author,
     global_setting(structopt::clap::AppSettings::ColoredHelp),
     after_help = "\
-Escape commands consist of a carriage return and one of the following sequences:
+Escape commands begin with <Enter> and end with one of the following sequences:
     ~~ - sends the '~' character
     ~. - terminates the connection
 "
@@ -262,7 +262,7 @@ fn write_start_screen_msg<W: Write>(screen: &mut Arc<Mutex<W>>) {
     let screen = screen.clone();
     write!(
         screen.lock().unwrap(),
-        "{}{}Welcome to serial console.{}To exit type CR + ~ + .\r\nor unplug the serial port.{}",
+        "{}{}Welcome to serial console.{}To exit type <Enter> + ~ + .\r\nor unplug the serial port.{}",
         termion::clear::All,
         termion::cursor::Goto(1, 1),
         termion::cursor::Goto(1, 2),
