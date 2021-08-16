@@ -81,8 +81,8 @@ Possible values:
 }
 
 enum EscapeState {
-    // Wait for carriage return
-    WaitForCR,
+    // Wait for Enter
+    WaitForEnter,
     // Wait for escape character
     WaitForEC,
     // Ready to process command
@@ -121,7 +121,7 @@ fn main() {
         tx.send((data, n)).unwrap();
     });
 
-    let mut escape_state: EscapeState = EscapeState::WaitForCR;
+    let mut escape_state: EscapeState = EscapeState::WaitForEnter;
     loop {
         let mut serial_bytes = [0; 512];
         match serial_port_out.read(&mut serial_bytes[..]) {
@@ -164,8 +164,8 @@ fn main() {
 
         if n == 1 {
             match escape_state {
-                EscapeState::WaitForCR => {
-                    if data[0] == b'\r' {
+                EscapeState::WaitForEnter => {
+                    if data[0] == b'\r' || data[0] == b'\n' {
                         escape_state = EscapeState::WaitForEC;
                     }
                 }
@@ -178,7 +178,7 @@ fn main() {
                         escape_state = EscapeState::WaitForEC;
                     }
                     _ => {
-                        escape_state = EscapeState::WaitForCR;
+                        escape_state = EscapeState::WaitForEnter;
                     }
                 },
                 EscapeState::ProcessCMD => match data[0] {
@@ -189,7 +189,7 @@ fn main() {
                         escape_state = EscapeState::WaitForEC;
                     }
                     _ => {
-                        escape_state = EscapeState::WaitForCR;
+                        escape_state = EscapeState::WaitForEnter;
                     }
                 },
             }
