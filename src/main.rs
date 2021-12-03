@@ -1,10 +1,11 @@
-use log::trace;
-use serialport::{DataBits, FlowControl, Parity, SerialPortBuilder, StopBits};
-use std::io::{stdin, stdout, Read, Write};
+use std::io::{self, stdin, stdout, Read, Write};
 use std::sync::mpsc::{self, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+
+use log::trace;
+use serialport::{DataBits, FlowControl, Parity, SerialPortBuilder, StopBits};
 use structopt::StructOpt;
 use termion::raw::IntoRawMode;
 use termion::screen::*;
@@ -92,16 +93,18 @@ enum EscapeState {
 fn main() {
     let sc_args: SC = SC::from_args();
 
-    let port: SerialPortBuilder = parse_arguments_into_serialport(&sc_args);
-    let port = match port.open() {
-        Ok(sp) => sp,
-        Err(err) if err.kind() == serialport::ErrorKind::Io(std::io::ErrorKind::NotFound) => {
+    let port_builder: SerialPortBuilder = parse_arguments_into_serialport(&sc_args);
+    let port;
+
+    match port_builder.open() {
+        Ok(sp) => port = sp,
+        Err(err) if err.kind() == serialport::ErrorKind::Io(io::ErrorKind::NotFound) => {
             eprint!("Device not found: {}\n\r", sc_args.device);
-            std::process::exit(1);
+            return;
         }
         Err(err) => {
             eprint!("Error opening port, please report this: {:?}\n\r", err);
-            std::process::exit(1);
+            return;
         }
     };
     let mut serial_port_in = port.try_clone().unwrap();
@@ -135,8 +138,8 @@ fn main() {
                     screen.lock().unwrap().flush().unwrap();
                 }
             }
-            Err(err) if err.kind() == std::io::ErrorKind::TimedOut => {}
-            Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => {
+            Err(err) if err.kind() == io::ErrorKind::TimedOut => {}
+            Err(err) if err.kind() == io::ErrorKind::BrokenPipe => {
                 eprint!("{}Device disconnected\n\r", ToMainScreen);
                 break;
             }
@@ -200,7 +203,7 @@ fn main() {
             Ok(i) => {
                 trace!("wrote {} bytes", i);
             }
-            Err(err) if err.kind() == std::io::ErrorKind::TimedOut => {}
+            Err(err) if err.kind() == io::ErrorKind::TimedOut => {}
             Err(err) => {
                 eprint!("{}{}\n\r", ToMainScreen, err);
                 break;
