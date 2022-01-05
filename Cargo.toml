@@ -10,11 +10,11 @@ keywords = ["cli", "serial", "console", "rs232"]
 edition = "2018"
 
 [dependencies]
+clap = { version = "3.0.4", features = ["derive"] }
 log = "0.4.14"
 serialport = "4.0.1"
-structopt = "0.3.22"
 termion = "1.5.6"
 
 [[bin]]
 name = "sc"
-path = "./src/main.rs"
+path = "src/main.rs"

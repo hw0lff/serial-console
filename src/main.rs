@@ -4,29 +4,29 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use clap::Parser;
 use log::trace;
 use serialport::{DataBits, FlowControl, Parity, SerialPortBuilder, StopBits};
-use structopt::StructOpt;
 use termion::raw::IntoRawMode;
 use termion::screen::*;
 
-#[derive(Debug, StructOpt)]
-#[structopt(
+#[derive(Debug, Parser)]
+#[clap(
     author,
-    global_setting(structopt::clap::AppSettings::ColoredHelp),
     after_help = "\
 Escape commands begin with <Enter> and end with one of the following sequences:
     ~~ - sends the '~' character
     ~. - terminates the connection
-"
+",
+    version
 )]
 struct SC {
     /// Sets the device path to a serial port
-    #[structopt(parse(from_str))]
+    #[clap(parse(from_str))]
     device: String,
 
     /// Sets the baud rate to connect at
-    #[structopt(
+    #[clap(
         name = "baud rate",
         default_value = "9600",
         long_help = r"Sets the baud rate to connect at
@@ -37,16 +37,17 @@ Common values: 300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400,
     baud_rate: u32,
 
     /// Sets the number of bits used per character
-    #[structopt(
+    #[clap(
         name = "data bits",
         default_value = "8",
         possible_values = &["5", "6", "7", "8"],
     )]
     data_bits: u8,
     /// Sets the parity checking mode
-    #[structopt(
+    #[clap(
+        name = "parity",
         default_value = "N",
-        case_insensitive = true,
+        ignore_case = true,
         possible_values = &["N","O","E"],
         long_help = r"Sets the parity checking mode
 
@@ -58,17 +59,17 @@ Possible values:
     )]
     parity: String,
     /// Sets the number of stop bits transmitted after every character
-    #[structopt(
+    #[clap(
         name = "stop bits",
         default_value = "1",
         possible_values = &["1", "2"],
     )]
     stop_bits: u8,
     /// Sets the flow control mode
-    #[structopt(
+    #[clap(
         name = "flow control",
         default_value = "N",
-        case_insensitive = true,
+        ignore_case = true,
         possible_values = &["N","H","S"],
         long_help = r"Sets the flow control mode
 
@@ -91,7 +92,7 @@ enum EscapeState {
 }
 
 fn main() {
-    let sc_args: SC = SC::from_args();
+    let sc_args: SC = SC::parse();
 
     let port_builder: SerialPortBuilder = parse_arguments_into_serialport(&sc_args);
     let port;
