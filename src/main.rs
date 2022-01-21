@@ -151,9 +151,13 @@ fn main() {
         }
 
         if n == 1 {
-            match escape_state_machine(&data[0], &mut escape_state) {
-                NextStep::LoopContinue => continue,
-                NextStep::LoopBreak => break,
+            match escape_state_machine(&data[0], &escape_state) {
+                (NextStep::None, next_escape_state) => escape_state = next_escape_state,
+                (NextStep::LoopContinue, next_escape_state) => {
+                    escape_state = next_escape_state;
+                    continue;
+                }
+                (NextStep::LoopBreak, _) => break,
                 _ => {}
             }
         }
@@ -200,38 +204,31 @@ fn read_from_stdin_thread(rx: &Receiver<([u8; 512], usize)>) -> NextStep {
     }
 }
 
-fn escape_state_machine(character: &u8, escape_state: &mut EscapeState) -> NextStep {
-    match escape_state {
-        EscapeState::WaitForEnter => {
-            if *character == b'\r' || *character == b'\n' {
-                *escape_state = EscapeState::WaitForEC;
-            }
-        }
+fn escape_state_machine(character: &u8, escape_state: &EscapeState) -> (NextStep, EscapeState) {
+    let mut next_step = NextStep::None;
+    let next_escape_state = match escape_state {
+        EscapeState::WaitForEnter => match *character {
+            b'\r' | b'\n' => EscapeState::WaitForEC,
+            _ => EscapeState::WaitForEnter,
+        },
         EscapeState::WaitForEC => match *character {
             b'~' => {
-                *escape_state = EscapeState::ProcessCMD;
-                return NextStep::LoopContinue;
+                next_step = NextStep::LoopContinue;
+                EscapeState::ProcessCMD
             }
-            b'\r' => {
-                *escape_state = EscapeState::WaitForEC;
-            }
-            _ => {
-                *escape_state = EscapeState::WaitForEnter;
-            }
+            b'\r' => EscapeState::WaitForEC,
+            _ => EscapeState::WaitForEnter,
         },
         EscapeState::ProcessCMD => match *character {
             b'.' => {
-                return NextStep::LoopBreak;
+                next_step = NextStep::LoopBreak;
+                EscapeState::WaitForEnter
             }
-            b'\r' => {
-                *escape_state = EscapeState::WaitForEC;
-            }
-            _ => {
-                *escape_state = EscapeState::WaitForEnter;
-            }
+            b'\r' => EscapeState::WaitForEC,
+            _ => EscapeState::WaitForEnter,
         },
-    }
-    NextStep::None
+    };
+    (next_step, next_escape_state)
 }
 
 fn write_to_serial_port(serial_port: &mut Box<dyn SerialPort>, data: &[u8]) -> NextStep {
