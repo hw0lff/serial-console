@@ -8,6 +8,7 @@ description = "A command line tool to communicate with a serial console"
 categories = ["command-line-utilities"]
 keywords = ["cli", "serial", "console", "rs232"]
 edition = "2021"
+exclude = ["aur/"]
 
 [dependencies]
 clap = { version = "3.0.10", features = ["derive"] }
