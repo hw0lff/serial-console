@@ -13,41 +13,41 @@ use termion::screen::{AlternateScreen, ToMainScreen};
     author,
     after_help = "\
 Escape commands begin with <Enter> and end with one of the following sequences:
-    ~~ - sends the '~' character
-    ~. - terminates the connection
+    ~~ - send the '~' character
+    ~. - terminate the connection
 ",
     version
 )]
 struct SC {
-    /// Sets the device path to a serial port
+    /// Set the device path to a serial port
     #[clap(parse(from_str))]
     device: String,
 
-    /// Sets the baud rate to connect at
+    /// Set the baud rate to connect at
     #[clap(
         name = "baud rate",
         default_value = "9600",
-        long_help = r"Sets the baud rate to connect at
+        long_help = r"Set the baud rate to connect at
 
 Common values: 300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 500000, 576000, 921600, 1000000, 1152000, 1500000, 2000000, 2500000, 3000000, 3500000, 4000000
 "
     )]
     baud_rate: u32,
 
-    /// Sets the number of bits used per character
+    /// Set the number of bits used per character
     #[clap(
         name = "data bits",
         default_value = "8",
         possible_values = &["5", "6", "7", "8"],
     )]
     data_bits: u8,
-    /// Sets the parity checking mode
+    /// Set the parity checking mode
     #[clap(
         name = "parity",
         default_value = "N",
         ignore_case = true,
         possible_values = &["N","O","E"],
-        long_help = r"Sets the parity checking mode
+        long_help = r"Set the parity checking mode
 
 Possible values:
     - N, n => None
@@ -56,20 +56,20 @@ Possible values:
 "
     )]
     parity: String,
-    /// Sets the number of stop bits transmitted after every character
+    /// Set the number of stop bits transmitted after every character
     #[clap(
         name = "stop bits",
         default_value = "1",
         possible_values = &["1", "2"],
     )]
     stop_bits: u8,
-    /// Sets the flow control mode
+    /// Set the flow control mode
     #[clap(
         name = "flow control",
         default_value = "N",
         ignore_case = true,
         possible_values = &["N","H","S"],
-        long_help = r"Sets the flow control mode
+        long_help = r"Set the flow control mode
 
 Possible values:
     - N, n => None
