@@ -1,11 +1,9 @@
 use std::io::{self, stdin, stdout, Read, Write};
-use std::sync::mpsc::{self, TryRecvError};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{channel, TryRecvError};
 use std::thread;
 use std::time::Duration;
 
 use clap::Parser;
-use log::trace;
 use serialport::{DataBits, FlowControl, Parity, SerialPortBuilder, StopBits};
 use termion::raw::IntoRawMode;
 use termion::screen::*;
@@ -112,12 +110,11 @@ fn main() {
     let mut serial_port_out = port.try_clone().unwrap();
 
     let mut stdin = stdin();
-    let screen = AlternateScreen::from(stdout().into_raw_mode().unwrap());
-    let screen = Arc::new(Mutex::new(screen));
+    let mut screen = AlternateScreen::from(stdout().into_raw_mode().unwrap());
 
-    write_start_screen_msg(&mut screen.clone());
+    write_start_screen_msg(&mut screen);
 
-    let (tx, rx) = mpsc::channel::<([u8; 512], usize)>();
+    let (tx, rx) = channel::<([u8; 512], usize)>();
 
     let _terminal_stdin = thread::spawn(move || loop {
         let mut data = [0; 512];
@@ -131,12 +128,8 @@ fn main() {
         match serial_port_out.read(&mut serial_bytes[..]) {
             Ok(n) => {
                 if n > 0 {
-                    screen
-                        .lock()
-                        .unwrap()
-                        .write_all(&serial_bytes[..n])
-                        .unwrap();
-                    screen.lock().unwrap().flush().unwrap();
+                    screen.write_all(&serial_bytes[..n]).unwrap();
+                    screen.flush().unwrap();
                 }
             }
             Err(err) if err.kind() == io::ErrorKind::TimedOut => {}
@@ -201,9 +194,7 @@ fn main() {
 
         // try to write terminal input to serial port
         match serial_port_in.write(&data[..n]) {
-            Ok(i) => {
-                trace!("wrote {} bytes", i);
-            }
+            Ok(_) => {}
             Err(err) if err.kind() == io::ErrorKind::TimedOut => {}
             Err(err) => {
                 eprint!("{}{}\n\r", ToMainScreen, err);
@@ -246,7 +237,7 @@ fn parse_arguments_into_serialport(sc_args: &SC) -> SerialPortBuilder {
             _ => FlowControl::None,
         }
     }
-    let path: String = sc_args.device.clone();
+    let path: &str = &sc_args.device;
     let baud_rate: u32 = sc_args.baud_rate;
     let data_bits: DataBits = match_data_bits(sc_args.data_bits);
     let parity: Parity = match_parity(sc_args.parity.as_str());
@@ -262,10 +253,9 @@ fn parse_arguments_into_serialport(sc_args: &SC) -> SerialPortBuilder {
         .timeout(timeout)
 }
 
-fn write_start_screen_msg<W: Write>(screen: &mut Arc<Mutex<W>>) {
-    let screen = screen.clone();
+fn write_start_screen_msg(screen: &mut impl Write) {
     write!(
-        screen.lock().unwrap(),
+        screen,
         "{}{}Welcome to serial console.{}To exit type <Enter> + ~ + .\r\nor unplug the serial port.{}",
         termion::clear::All,
         termion::cursor::Goto(1, 1),
@@ -273,5 +263,5 @@ fn write_start_screen_msg<W: Write>(screen: &mut Arc<Mutex<W>>) {
         termion::cursor::Goto(1, 4)
     )
     .unwrap();
-    screen.lock().unwrap().flush().unwrap();
+    screen.flush().unwrap();
 }

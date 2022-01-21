@@ -10,8 +10,7 @@ keywords = ["cli", "serial", "console", "rs232"]
 edition = "2018"
 
 [dependencies]
-clap = { version = "3.0.4", features = ["derive"] }
-log = "0.4.14"
+clap = { version = "3.0.10", features = ["derive"] }
 serialport = "4.0.1"
 termion = "1.5.6"
 
