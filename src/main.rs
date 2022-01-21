@@ -20,6 +20,7 @@ Escape commands begin with <Enter> and end with one of the following sequences:
         "help",
         |a| a.help("Print help information,\nPrint verbose help information with --help")
     ),
+    name = env!("CARGO_BIN_NAME"),
     version
 )]
 struct SC {
@@ -298,9 +299,10 @@ fn parse_arguments_into_serialport(sc_args: &SC) -> SerialPortBuilder {
 fn write_start_screen_msg(screen: &mut impl Write) {
     write!(
         screen,
-        "{}{}Welcome to serial console.{}To exit type <Enter> + ~ + .\r\nor unplug the serial port.{}",
+        "{}{}Welcome to {}.{}To exit type <Enter> + ~ + .\r\nor unplug the serial port.{}",
         termion::clear::All,
         termion::cursor::Goto(1, 1),
+        env!("CARGO_BIN_NAME"),
         termion::cursor::Goto(1, 2),
         termion::cursor::Goto(1, 4)
     )
