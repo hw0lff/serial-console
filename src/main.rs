@@ -1,12 +1,12 @@
 use std::io::{self, stdin, stdout, Read, Write};
-use std::sync::mpsc::{channel, TryRecvError};
+use std::sync::mpsc::{channel, Receiver, TryRecvError};
 use std::thread;
 use std::time::Duration;
 
 use clap::Parser;
-use serialport::{DataBits, FlowControl, Parity, SerialPortBuilder, StopBits};
-use termion::raw::IntoRawMode;
-use termion::screen::*;
+use serialport::{DataBits, FlowControl, Parity, SerialPort, SerialPortBuilder, StopBits};
+use termion::raw::{IntoRawMode, RawTerminal};
+use termion::screen::{AlternateScreen, ToMainScreen};
 
 #[derive(Debug, Parser)]
 #[clap(
@@ -89,14 +89,20 @@ enum EscapeState {
     ProcessCMD,
 }
 
+enum NextStep {
+    LoopContinue,
+    LoopBreak,
+    Data(Box<([u8; 512], usize)>),
+    None,
+}
+
 fn main() {
     let sc_args: SC = SC::parse();
 
     let port_builder: SerialPortBuilder = parse_arguments_into_serialport(&sc_args);
-    let port;
-
+    let mut serial_port;
     match port_builder.open() {
-        Ok(sp) => port = sp,
+        Ok(sp) => serial_port = sp,
         Err(err) if err.kind() == serialport::ErrorKind::Io(io::ErrorKind::NotFound) => {
             eprint!("Device not found: {}\n\r", sc_args.device);
             return;
@@ -106,8 +112,6 @@ fn main() {
             return;
         }
     };
-    let mut serial_port_in = port.try_clone().unwrap();
-    let mut serial_port_out = port.try_clone().unwrap();
 
     let mut stdin = stdin();
     let mut screen = AlternateScreen::from(stdout().into_raw_mode().unwrap());
@@ -116,6 +120,7 @@ fn main() {
 
     let (tx, rx) = channel::<([u8; 512], usize)>();
 
+    // read from terminal stdin
     let _terminal_stdin = thread::spawn(move || loop {
         let mut data = [0; 512];
         let n = stdin.read(&mut data[..]).unwrap();
@@ -124,84 +129,117 @@ fn main() {
 
     let mut escape_state: EscapeState = EscapeState::WaitForEnter;
     loop {
-        let mut serial_bytes = [0; 512];
-        match serial_port_out.read(&mut serial_bytes[..]) {
-            Ok(n) => {
-                if n > 0 {
-                    screen.write_all(&serial_bytes[..n]).unwrap();
-                    screen.flush().unwrap();
-                }
-            }
-            Err(err) if err.kind() == io::ErrorKind::TimedOut => {}
-            Err(err) if err.kind() == io::ErrorKind::BrokenPipe => {
-                eprint!("{}Device disconnected\n\r", ToMainScreen);
-                break;
-            }
-            Err(err) => {
-                eprint!("{}{}\n\r", ToMainScreen, err);
-                break;
-            }
+        if let NextStep::LoopBreak = read_from_serial_port(&mut serial_port, &mut screen) {
+            break;
         }
 
         let data: [u8; 512];
         let n: usize;
-        match rx.try_recv() {
-            Ok((rx_data, rx_n)) => {
-                data = rx_data;
-                n = rx_n;
+        match read_from_stdin_thread(&rx) {
+            NextStep::LoopContinue => continue,
+            NextStep::LoopBreak => break,
+            NextStep::Data(d) => {
+                data = d.0;
+                n = d.1;
             }
-            Err(TryRecvError::Disconnected) => {
-                eprint!("{}Error: Stdin reading thread stopped.\n\r", ToMainScreen,);
-                break;
-            }
-            Err(TryRecvError::Empty) => {
-                continue;
-            }
+            _ => unreachable!(),
         }
 
         if n == 1 {
-            match escape_state {
-                EscapeState::WaitForEnter => {
-                    if data[0] == b'\r' || data[0] == b'\n' {
-                        escape_state = EscapeState::WaitForEC;
-                    }
-                }
-                EscapeState::WaitForEC => match data[0] {
-                    b'~' => {
-                        escape_state = EscapeState::ProcessCMD;
-                        continue;
-                    }
-                    b'\r' => {
-                        escape_state = EscapeState::WaitForEC;
-                    }
-                    _ => {
-                        escape_state = EscapeState::WaitForEnter;
-                    }
-                },
-                EscapeState::ProcessCMD => match data[0] {
-                    b'.' => {
-                        break;
-                    }
-                    b'\r' => {
-                        escape_state = EscapeState::WaitForEC;
-                    }
-                    _ => {
-                        escape_state = EscapeState::WaitForEnter;
-                    }
-                },
+            match escape_state_machine(&data[0], &mut escape_state) {
+                NextStep::LoopContinue => continue,
+                NextStep::LoopBreak => break,
+                _ => {}
             }
         }
 
-        // try to write terminal input to serial port
-        match serial_port_in.write(&data[..n]) {
-            Ok(_) => {}
-            Err(err) if err.kind() == io::ErrorKind::TimedOut => {}
-            Err(err) => {
-                eprint!("{}{}\n\r", ToMainScreen, err);
-                break;
-            }
+        if let NextStep::LoopBreak = write_to_serial_port(&mut serial_port, &data[..n]) {
+            break;
         }
     }
+}
+
+fn read_from_serial_port(
+    serial_port: &mut Box<dyn SerialPort>,
+    screen: &mut AlternateScreen<RawTerminal<io::Stdout>>,
+) -> NextStep {
+    let mut serial_bytes = [0; 512];
+    match serial_port.read(&mut serial_bytes[..]) {
+        Ok(n) => {
+            if n > 0 {
+                screen.write_all(&serial_bytes[..n]).unwrap();
+                screen.flush().unwrap();
+            }
+        }
+        Err(err) if err.kind() == io::ErrorKind::TimedOut => {}
+        Err(err) if err.kind() == io::ErrorKind::BrokenPipe => {
+            eprint!("{}Device disconnected\n\r", ToMainScreen);
+            return NextStep::LoopBreak;
+        }
+        Err(err) => {
+            eprint!("{}{}\n\r", ToMainScreen, err);
+            return NextStep::LoopBreak;
+        }
+    }
+    NextStep::None
+}
+
+fn read_from_stdin_thread(rx: &Receiver<([u8; 512], usize)>) -> NextStep {
+    match rx.try_recv() {
+        Ok(data) => NextStep::Data(Box::new(data)),
+        Err(TryRecvError::Empty) => NextStep::LoopContinue,
+        Err(TryRecvError::Disconnected) => {
+            eprint!("{}Error: Stdin reading thread stopped.\n\r", ToMainScreen);
+            NextStep::LoopBreak
+        }
+    }
+}
+
+fn escape_state_machine(character: &u8, escape_state: &mut EscapeState) -> NextStep {
+    match escape_state {
+        EscapeState::WaitForEnter => {
+            if *character == b'\r' || *character == b'\n' {
+                *escape_state = EscapeState::WaitForEC;
+            }
+        }
+        EscapeState::WaitForEC => match *character {
+            b'~' => {
+                *escape_state = EscapeState::ProcessCMD;
+                return NextStep::LoopContinue;
+            }
+            b'\r' => {
+                *escape_state = EscapeState::WaitForEC;
+            }
+            _ => {
+                *escape_state = EscapeState::WaitForEnter;
+            }
+        },
+        EscapeState::ProcessCMD => match *character {
+            b'.' => {
+                return NextStep::LoopBreak;
+            }
+            b'\r' => {
+                *escape_state = EscapeState::WaitForEC;
+            }
+            _ => {
+                *escape_state = EscapeState::WaitForEnter;
+            }
+        },
+    }
+    NextStep::None
+}
+
+fn write_to_serial_port(serial_port: &mut Box<dyn SerialPort>, data: &[u8]) -> NextStep {
+    // try to write terminal input to serial port
+    match serial_port.write(data) {
+        Ok(_) => {}
+        Err(err) if err.kind() == io::ErrorKind::TimedOut => {}
+        Err(err) => {
+            eprint!("{}{}\n\r", ToMainScreen, err);
+            return NextStep::LoopBreak;
+        }
+    }
+    NextStep::None
 }
 
 fn parse_arguments_into_serialport(sc_args: &SC) -> SerialPortBuilder {
