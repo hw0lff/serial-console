@@ -16,6 +16,10 @@ Escape commands begin with <Enter> and end with one of the following sequences:
     ~~ - send the '~' character
     ~. - terminate the connection
 ",
+    mut_arg(
+        "help",
+        |a| a.help("Print help information,\nPrint verbose help information with --help")
+    ),
     version
 )]
 struct SC {
