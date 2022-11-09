@@ -261,7 +261,7 @@ fn parse_arguments_into_serialport(sc_args: &SC) -> SerialPortBuilder {
         match parity {
             "N" | "n" => Parity::None,
             "O" | "o" => Parity::Odd,
-            "E" | "e" => Parity::None,
+            "E" | "e" => Parity::Even,
             _ => Parity::None,
         }
     }
